@@ -2,9 +2,11 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProductsModule } from './products/products.module';
+import { CommonModule } from 'src/common/common.module';
 
 @Module({
   imports: [
+    CommonModule,
     ConfigModule.forRoot(),
     TypeOrmModule.forRoot({
       type: 'postgres',
@@ -19,4 +21,4 @@ import { ProductsModule } from './products/products.module';
     ProductsModule
   ],
 })
-export class AppModule {}
+export class AppModule { }
