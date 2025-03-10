@@ -3,10 +3,11 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Product } from './entities/product.entity';
-import { Repository } from 'typeorm';
+import { Like, Repository } from 'typeorm';
 import { DatabaseExceptionService } from 'src/common/services/database-exception.service';
 import { PaginationDto } from 'src/common/dtos/pagination.dto';
 import { isUUID } from 'class-validator';
+import { DatabaseTableColumns } from 'src/common/services/database-table-columns.service';
 
 @Injectable()
 export class ProductsService {
@@ -15,6 +16,7 @@ export class ProductsService {
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
     private readonly databaseExceptionService: DatabaseExceptionService,
+    private readonly databaseTableColumns: DatabaseTableColumns,
   ) { }
 
 
@@ -32,7 +34,8 @@ export class ProductsService {
     const { limit = 10, offset = 0 } = paginationDto
     return this.productRepository.find({
       take: limit,
-      skip: offset
+      skip: offset,
+      select: this.databaseTableColumns.getColumnsExcludingBy(this.productRepository, ['id'])
     });
   }
 
@@ -40,45 +43,55 @@ export class ProductsService {
     let product: Product | null;
 
     if (isUUID(term)) {
-      product = await this.productRepository.findOneBy({ id: term });
+      product = await this.productRepository.findOneBy({ uuid: term });
     } else {
-      product = await this.productRepository.findOne({
-        where: [
-          { title: term },
-          { slug: term },
-        ]
-      });
+      const upperTerm = term.toUpperCase();
+
+      product = await this.productRepository
+        .createQueryBuilder()
+        .where('UPPER(title) = :upperTerm', { upperTerm })
+        .orWhere('UPPER(slug) = :upperTerm', { upperTerm })
+        .getOne();
     }
 
     if (!product) {
       throw new NotFoundException(`Product with term: ${term} not found`);
     }
 
-    return product;
+    return { ...product, id: undefined };
   }
 
-  async update(id: string, updateProductDto: UpdateProductDto) {
+  async update(uuid: string, updateProductDto: UpdateProductDto) {
     try {
+      const { id } = await this.findOne(uuid)
       const product = await this.productRepository.preload({
         id,
         ...updateProductDto,
       });
 
       if (!product) {
-        throw new NotFoundException(`Product with id: ${id} not found`);
+        throw new NotFoundException(`Product with id: ${uuid} not found`);
       }
 
-      return await this.productRepository.save(product);
+      const response = await this.productRepository.save(product)
+      return { ...response, id: undefined }
+
     } catch (error) {
       this.databaseExceptionService.handleDBExceptions(error, ProductsService.name);
     }
   }
 
-  async remove(id: string) {
+  async remove(uuid: string) {
     try {
-      const product = await this.findOne(id);
-      await this.productRepository.remove(product);
-      return this.findAll({ limit: 10, offset: 0 });
+      const product = await this.productRepository.findOneBy({ uuid }) as Product
+
+      if (product) {
+        await this.productRepository.remove(product);
+        return this.findAll({ limit: 10, offset: 0 });
+      }
+
+      throw new NotFoundException(`Product with id: ${uuid} not found`);
+
     } catch (error) {
       this.databaseExceptionService.handleDBExceptions(error, ProductsService.name);
     }
