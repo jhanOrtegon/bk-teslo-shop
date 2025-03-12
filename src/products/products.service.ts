@@ -8,6 +8,7 @@ import { DatabaseExceptionService } from 'src/common/services/database-exception
 import { PaginationDto } from 'src/common/dtos/pagination.dto';
 import { isUUID } from 'class-validator';
 import { DatabaseTableColumns } from 'src/common/services/database-table-columns.service';
+import { ProductImage } from './entities/product-image.entity';
 
 @Injectable()
 export class ProductsService {
@@ -15,6 +16,10 @@ export class ProductsService {
   constructor(
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
+
+    @InjectRepository(ProductImage)
+    private readonly productImageRepository: Repository<ProductImage>,
+
     private readonly databaseExceptionService: DatabaseExceptionService,
     private readonly databaseTableColumns: DatabaseTableColumns,
   ) { }
@@ -22,21 +27,31 @@ export class ProductsService {
 
   async create(createProductDto: CreateProductDto) {
     try {
-      const product = this.productRepository.create(createProductDto);
+      const { images = [], ...productDetail } = createProductDto
+
+      const product = this.productRepository.create({
+        ...productDetail,
+        images: images.map(url => this.productImageRepository.create({ url }))
+      });
+
       await this.productRepository.save(product);
-      return product;
+      return { ...product, images };
     } catch (error) {
       this.databaseExceptionService.handleDBExceptions(error, ProductsService.name);
     }
   }
 
-  findAll(paginationDto: PaginationDto) {
+  async findAll(paginationDto: PaginationDto) {
     const { limit = 10, offset = 0 } = paginationDto
-    return this.productRepository.find({
+    const products = await this.productRepository.find({
       take: limit,
       skip: offset,
-      select: this.databaseTableColumns.getColumnsExcludingBy(this.productRepository, ['id'])
+      relations: {
+        images: true
+      },
     });
+
+    return products.map(product => ({ ...product, images: product.images?.map(image => image.url) }))
   }
 
   async findOne(term: string) {
@@ -48,9 +63,10 @@ export class ProductsService {
       const upperTerm = term.toUpperCase();
 
       product = await this.productRepository
-        .createQueryBuilder()
+        .createQueryBuilder('product')
         .where('UPPER(title) = :upperTerm', { upperTerm })
         .orWhere('UPPER(slug) = :upperTerm', { upperTerm })
+        .leftJoinAndSelect('product.images', 'productImages')
         .getOne();
     }
 
@@ -67,6 +83,7 @@ export class ProductsService {
       const product = await this.productRepository.preload({
         id,
         ...updateProductDto,
+        images: []
       });
 
       if (!product) {

@@ -44,4 +44,9 @@ export class CreateProductDto {
     @IsDate()
     @IsOptional()
     updatedAt?: Date;
+
+    @IsString({ each: true })
+    @IsArray()
+    @IsOptional()
+    images: string[];
 }

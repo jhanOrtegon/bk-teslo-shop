@@ -6,9 +6,11 @@ import {
     Entity,
     Generated,
     Index,
+    OneToMany,
     PrimaryGeneratedColumn,
     UpdateDateColumn
 } from "typeorm";
+import { ProductImage } from "./product-image.entity";
 
 @Entity()
 @Index('idx_product_uuid', ['uuid'])
@@ -49,6 +51,13 @@ export class Product {
 
     @UpdateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
     updatedAt: Date;
+
+    @OneToMany(
+        () => ProductImage,
+        productImage => productImage.product,
+        { cascade: true, eager: true }
+    )
+    images?: ProductImage[]
 
     @BeforeInsert()
     checkSlugInsert() {
