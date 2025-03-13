@@ -3,7 +3,7 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Product } from './entities/product.entity';
-import { Like, Repository } from 'typeorm';
+import { DataSource, Like, Repository } from 'typeorm';
 import { DatabaseExceptionService } from 'src/common/services/database-exception.service';
 import { PaginationDto } from 'src/common/dtos/pagination.dto';
 import { isUUID } from 'class-validator';
@@ -22,6 +22,8 @@ export class ProductsService {
 
     private readonly databaseExceptionService: DatabaseExceptionService,
     private readonly databaseTableColumns: DatabaseTableColumns,
+
+    private readonly dataSource: DataSource
   ) { }
 
 
@@ -74,26 +76,41 @@ export class ProductsService {
       throw new NotFoundException(`Product with term: ${term} not found`);
     }
 
-    return { ...product, id: undefined };
+    return product;
   }
 
   async update(uuid: string, updateProductDto: UpdateProductDto) {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction()
+
     try {
       const { id } = await this.findOne(uuid)
-      const product = await this.productRepository.preload({
-        id,
-        ...updateProductDto,
-        images: []
-      });
+
+      const { images = [], ...update } = updateProductDto
+
+      const product = await this.productRepository.preload({ id, ...update, });
 
       if (!product) {
         throw new NotFoundException(`Product with id: ${uuid} not found`);
       }
 
-      const response = await this.productRepository.save(product)
-      return { ...response, id: undefined }
+      if (images.length) {
+        await queryRunner.manager.delete(ProductImage, { product: id })
+        product.images = images.map(image =>
+          this.productImageRepository.create({ url: image })
+        )
+      }
+
+      await queryRunner.manager.save(product);
+      await queryRunner.commitTransaction();
+      await queryRunner.release();
+
+      return this.findOne(uuid)
 
     } catch (error) {
+      await queryRunner.rollbackTransaction();
+      await queryRunner.release();
       this.databaseExceptionService.handleDBExceptions(error, ProductsService.name);
     }
   }
